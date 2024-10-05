@@ -1,9 +1,13 @@
 package com.example.oscarmedinaendevinaelnmero;
 
 import android.content.DialogInterface;
+import android.content.Intent;
 import android.os.Bundle;
-import java.util.Random;
 
+import java.util.Date;
+import java.util.Random;
+import java.io.Serializable;
+import java.util.ArrayList;
 import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
@@ -18,44 +22,11 @@ import android.app.AlertDialog;
 import android.view.KeyEvent;
 import android.view.inputmethod.EditorInfo;
 
-/*
-    Ves al layout i crea la casella d'entrada per al número. Es tracta d'un objecte TextEdit,
-    però volem restringir-ho perquè només ens deixi entrar nombres i no lletres. Entre els
-    objectes disponibles al IDE hi ha un de predefinit que ja ens ho facilita.
-
-    Crea un botó i un listener perquè l'usuari validi l'entrada del número.
-    Prova que funciona amb un Toast, per exemple.
-
-    Investiga com crear un nombre aleatori en Java. Crea un al mètode onCreate de l'Activity
-    i emmagatzema-ho en una propietat de l'objecte per tenir-ho disponible quan calgui.
-
-    Anem al codi principal del joc, que estarà principalment al onClick del listener. Quan l'usuari
-    entri un número li mostrem un Toast dient-li si el nombre que busca és major o menor.
-
-    Afegeix un AlertDialog per avisar l'usuari de quan acaba la partida i felicitar-lo.
-
-    Quan s'acaba la partida, es regenera el número aleatori i es torna a jugar.
-
-    Posa un TextView per anar indicant a l'usuari l'historial dels intents i resultats que ha obtingut.
-
-    Per aconseguir un scroll en la pantalla de l'historial podem posar un ScrollView i a dins seu posar el TextView.
-
-    Implementa un comptador d'intents que es visualitzi en algun racó de la pantalla. Ens servirà per després fer el ranking.
-
-Podem millorar la jugabilitat amb alguns detalls més.
-
-    Per facilitar el joc a l'usuari, esborrem el número del EditText quan l'usuari fa un intent d'endevinar
-    (si no, l'usuari haurà d'esborrar-ho manualment).
-
-    Es pot millorar la jugabilitat si implementem que el joc detecti la tecla Enter del teclat de pantalla.
-    S'implementa millor amb un OnEditorActionListener ja que el OnClickListener amaga el teclat al prèmer ENTER.
-    
-    Encara que detecteu correctament el Enter, us passarà que trobareu un ACTION_UP i un ACTION_DOWN,
-    pel que la callback es cridarà dos cops. Filtreu aquests dos esdeveniments i avalueu l'entrada de
-    l'usuari només en un dels dos (preferentment ACTION_DOWN). També convé recuperar el focus dintre del
-    EditText perquè l'usuari no hagi de clicar de nou el widget cada cop que fa un intent.
-
- */
+class Record implements Serializable {
+    public String name;
+    public int attempts;
+    public String time;
+}
 
 public class MainActivity extends AppCompatActivity {
 
@@ -64,25 +35,30 @@ public class MainActivity extends AppCompatActivity {
     TextView attemptsText;
     TextView historyText;
     EditText editText;
+    boolean timerActive = false;
+    long startTime = 0;
+    static ArrayList<Record> records;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         number = new Random().nextInt(100)+1;
+        if (records == null) {
+            records = new ArrayList<Record>();
+        }
 
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
         Button button = findViewById(R.id.button);
+        Button RecordsButton = findViewById(R.id.RecordsButton);
         editText = findViewById(R.id.inputText);
-        editText.setOnEditorActionListener(new TextView.OnEditorActionListener() {
-            @Override
-            public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
-                if (actionId == EditorInfo.IME_ACTION_DONE) {
-                    CheckInput();
-                    return true;
-                }
-                return false;
+        editText.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_ENTER) {
+                // Trigger the button's click event
+                button.performClick();
+                return true; // Indicate that the event was handled
             }
+            return false; // Pass other events
         });
         attemptsText = findViewById(R.id.attempts);
         attemptsText.setText("Attempts: " + 0);
@@ -95,10 +71,26 @@ public class MainActivity extends AppCompatActivity {
                 CheckInput();
             }
         });
-        
+
+        RecordsButton.setOnClickListener(new View.OnClickListener(){
+            @Override
+            public void onClick(View v) {
+                ChangeToRecords();
+            }
+        });
+    }
+
+    public void ChangeToRecords() {
+        Intent intent = new Intent(this, RecordsView.class);
+        intent.putExtra("records", records);
+        startActivity(intent);
     }
 
     public void CheckInput() {
+        if (!timerActive) {
+            startTime = System.currentTimeMillis();
+            timerActive = true;
+        }
         SetAttempts(attempts+1);
         String input = editText.getText().toString();
         TestInput(input);
@@ -126,18 +118,45 @@ public class MainActivity extends AppCompatActivity {
             AddHistory("The number is less than " + num);
         }
         else {
-            AlertDialog.Builder builder = new AlertDialog.Builder(this);
-            builder.setTitle("You win!");
-            builder.setMessage("You won in " + attempts + " attempts");
-            builder.setPositiveButton("New game", new DialogInterface.OnClickListener() {
-                public void onClick(DialogInterface dialog, int id) {
-                    number = new Random().nextInt(100)+1;
-                    SetAttempts(0);
-                    ClearHistory();
-                }
-            });
-            builder.show();
+            WinDialog();
         }
+    }
+
+    public void WinDialog() {
+
+        long endTime = System.currentTimeMillis();
+        int time = (int) ((endTime - startTime) / 1000);
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("You win!");
+        builder.setMessage("You won in " + attempts + " attempts and in " + time + " seconds");
+        EditText name = new EditText(this);
+        builder.setView(name);
+        builder.setPositiveButton("Save Record", new DialogInterface.OnClickListener() {
+            public void onClick(DialogInterface dialog, int id) {
+                if (name.getText().toString().equals("")) {
+                    Toast.makeText(MainActivity.this, "You need to write your name", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                Record record = new Record();
+                record.name = name.getText().toString();
+                record.attempts = attempts;
+                record.time = formatTime(time);
+                records.add(record);
+                number = new Random().nextInt(100)+1;
+                SetAttempts(0);
+                ClearHistory();
+                dialog.cancel();
+            }
+        });
+        builder.setNegativeButton("Continue Without Saving", new DialogInterface.OnClickListener() {
+            public void onClick(DialogInterface dialog, int id) {
+                number = new Random().nextInt(100)+1;
+                SetAttempts(0);
+                ClearHistory();
+                dialog.cancel();
+            }
+        });
+        builder.show();
     }
 
     public void SetAttempts(int num) {
@@ -146,10 +165,21 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void AddHistory(String text) {
-        historyText.append(text + "\n");
+        historyText.setText(historyText.getText() + text + "\n");
     }
 
     public void ClearHistory() {
         historyText.setText("history:\n");
+    }
+
+    public static String formatTime(int seconds) {
+        int minutes = seconds / 60;
+        seconds = seconds % 60;
+        
+        if (minutes > 0) {
+            return minutes + "m " + seconds + "s";
+        } else {
+            return seconds + "s";
+        }
     }
 }
